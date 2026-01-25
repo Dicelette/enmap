@@ -229,10 +229,10 @@ export default class Enmap<V = any, SV = unknown> {
    *
    * const someSubValue = enmap.get("anObjectKey", "someprop.someOtherSubProp");
    */
-  get(key: string): V | null;
-  get<P extends Path<V>>(key: string, path: P): PathValue<V, P> | null;
-  get<P extends Path<V>>(key: string, path: P | undefined): V | PathValue<V, P> | null;
-  get<P extends Path<V>>(key: string, path?: P): V | PathValue<V, P> | null {
+  get(key: string): V | undefined;
+  get<P extends Path<V>>(key: string, path: P): PathValue<V, P> | undefined;
+  get<P extends Path<V>>(key: string, path: P | undefined): V | PathValue<V, P> | undefined;
+  get<P extends Path<V>>(key: string, path?: P): V | PathValue<V, P> | undefined {
     this.#keycheck(key);
 
     if (!isNil(this.#autoEnsure) && !this.has(key)) {
@@ -242,8 +242,8 @@ export default class Enmap<V = any, SV = unknown> {
     const data = this.#db
       .prepare(`SELECT value FROM ${this.#name}  WHERE key = ?`)
       .get(key) as { value: string } | undefined;
-    const parsed = data ? this.#parse(data.value, key) : null;
-    if (isNil(parsed)) return null;
+    const parsed = data ? this.#parse(data.value, key) : undefined;
+    if (isNil(parsed)) return undefined;
 
     if (path) {
       this.#check(key, ['Object']);
@@ -508,7 +508,7 @@ export default class Enmap<V = any, SV = unknown> {
     operation: MathOps,
     operand: number,
     path?: Path<V>,
-  ): number | null {
+  ): number | undefined {
     this.#keycheck(key);
     this.#check(key, ['Number'], path);
     const data = this.get(key, path);
@@ -580,17 +580,17 @@ export default class Enmap<V = any, SV = unknown> {
    * console.log(settings) // enmap's value for "1234567890" if it exists, otherwise the defaultSettings value.
    * @return {*} The value from the database for the key, or the default value provided for a new key.
    */
-  ensure(key: string, defaultValue: any): V | null;
+  ensure(key: string, defaultValue: any): V | undefined;
   ensure<P extends Path<V>>(
     key: string,
     defaultValue: any,
     path: P,
-  ): PathValue<V, P> | null;
+  ): PathValue<V, P> | undefined;
   ensure<P extends Path<V>>(
     key: string,
     defaultValue: any,
     path?: P,
-  ): V | PathValue<V, P> | null {
+  ): V | PathValue<V, P> | undefined {
     this.#keycheck(key);
 
     if (!isNil(this.#autoEnsure)) {
@@ -911,7 +911,7 @@ export default class Enmap<V = any, SV = unknown> {
   find(
     pathOrFn: ((val: V, key: string) => boolean) | string,
     value?: any,
-  ): V | null {
+  ): V | undefined {
     const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
     for (const row of stmt.iterate() as IterableIterator<{
       key: string;
@@ -925,7 +925,7 @@ export default class Enmap<V = any, SV = unknown> {
         return parsed;
       }
     }
-    return null;
+    return undefined;
   }
 
   /**
@@ -943,7 +943,7 @@ export default class Enmap<V = any, SV = unknown> {
   findIndex(
     pathOrFn: ((val: V, key: string) => boolean) | string,
     value?: any,
-  ): string | null {
+  ): string | undefined {
     const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
     for (const row of stmt.iterate() as IterableIterator<{
       key: string;
@@ -957,7 +957,7 @@ export default class Enmap<V = any, SV = unknown> {
         return row.key;
       }
     }
-    return null;
+    return undefined;
   }
 
   /**
@@ -1207,7 +1207,7 @@ export default class Enmap<V = any, SV = unknown> {
     }
   }
 
-  #math(base: number, op: MathOps, opand: number): number | null {
+  #math(base: number, op: MathOps, opand: number): number | undefined {
     if (base == undefined || op == undefined || opand == undefined)
       throw new Err(
         'Math Operation requires base and operation',
@@ -1242,6 +1242,6 @@ export default class Enmap<V = any, SV = unknown> {
       case 'random':
         return Math.floor(Math.random() * Math.floor(opand));
     }
-    return null;
+    return undefined;
   }
 }
