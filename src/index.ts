@@ -254,19 +254,35 @@ export default class Enmap<V = any, SV = unknown> {
 
   /**
    * Returns whether or not the key exists in the Enmap.
-   * @param key Required. The key of the element to add to The Enmap or array.
+   * @param {string} key Required. The key of the element to add to The Enmap or array.
+   * @param {string} path Optional. The name of the property to check inside the object or array.
+   * Should be a path with dot notation, such as "prop1.subprop2.subprop3"
    * @example
    * if(enmap.has("myKey")) {
    *   // key is there
    * }
+   *
+   * if(!enmap.has("myOtherKey", "oneProp.otherProp.SubProp")) return false;
    * @returns {boolean}
    */
-  has(key: string): boolean {
+  has(key: string, path?: string): boolean {
     this.#keycheck(key);
+    
+    // Check if the key exists
     const data = this.#db
       .prepare(`SELECT count(*) FROM ${this.#name} WHERE key = ?`)
       .get(key) as { 'count(*)': number };
-    return data['count(*)'] > 0;
+    
+    if (data['count(*)'] === 0) return false;
+    
+    // If path is provided, check if the path exists within the value
+    if (path) {
+      this.#check(key, ['Object']);
+      const value = this.get(key);
+      return _get(value, path) !== undefined;
+    }
+    
+    return true;
   }
 
   /**
