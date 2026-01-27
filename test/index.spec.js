@@ -107,10 +107,10 @@ describe('Enmap', () => {
         expect(enmap.get('setNumber')).toBe(1);
       });
 
-      test('should set a value w/ null', () => {
-        enmap.set('setNull', null);
+      test('should set a value w/ undefined', () => {
+        enmap.set('setNull', undefined);
 
-        expect(enmap.get('setNull')).toBe(null);
+        expect(enmap.get('setNull')).toBe(undefined);
       });
 
       test('should set a value w/ boolean', () => {
@@ -380,7 +380,7 @@ describe('Enmap', () => {
         enmap.set('huh', 1);
         enmap.math('huh', 'huh', 1);
 
-        expect(enmap.get('huh')).toBe(null);
+        expect(enmap.get('huh')).toBe(undefined);
       });
 
       test('should math value w/ path', () => {
@@ -512,7 +512,7 @@ describe('Enmap', () => {
         enmap.set('delete', 'value');
         enmap.delete('delete');
 
-        expect(enmap.get('delete')).toBe(null);
+        expect(enmap.get('delete')).toBe(undefined);
       });
 
       test('should delete a path', () => {
@@ -530,7 +530,7 @@ describe('Enmap', () => {
         enmap.set('clear', 'value');
         enmap.clear();
 
-        expect(enmap.get('clear')).toBe(null);
+        expect(enmap.get('clear')).toBe(undefined);
       });
     });
 
@@ -827,11 +827,11 @@ describe('Enmap', () => {
         expect(enmap.find('sub', 'value')).toEqual({ sub: 'value' });
       });
 
-      test('should return null if not found', () => {
+      test('should return undefined if not found', () => {
         enmap.set('find', 'value');
         enmap.set('find2', 'value2');
 
-        expect(enmap.find((val) => val === 'value3')).toBe(null);
+        expect(enmap.find((val) => val === 'value3')).toBe(undefined);
       });
     });
 
@@ -852,11 +852,11 @@ describe('Enmap', () => {
         expect(enmap.findIndex('sub', 'value')).toBe('find');
       });
 
-      test('should return null if not found', () => {
+      test('should return undefined if not found', () => {
         enmap.set('find', 'value');
         enmap.set('find2', 'value2');
 
-        expect(enmap.findIndex((val) => val === 'value3')).toBe(null);
+        expect(enmap.findIndex((val) => val === 'value3')).toBe(undefined);
       });
     });
 
