@@ -255,7 +255,7 @@ export default class Enmap<V = any, SV = unknown> {
   /**
    * Returns whether or not the key exists in the Enmap.
    * @param {string} key Required. The key of the element to add to The Enmap or array.
-   * @param {string} path Optional. The name of the property to check inside the object or array.
+   * @param {Path<V>} path Optional. The name of the property to check inside the object or array.
    * Should be a path with dot notation, such as "prop1.subprop2.subprop3"
    * @example
    * if(enmap.has("myKey")) {
@@ -265,7 +265,7 @@ export default class Enmap<V = any, SV = unknown> {
    * if(!enmap.has("myOtherKey", "oneProp.otherProp.SubProp")) return false;
    * @returns {boolean}
    */
-  has(key: string, path?: string): boolean {
+  has(key: string, path?: Path<V>): boolean {
     this.#keycheck(key);
     
     // Check if the key exists
