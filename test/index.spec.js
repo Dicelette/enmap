@@ -484,6 +484,12 @@ describe('Enmap', () => {
         expect(enmap.has('has')).toBe(true);
       });
 
+      test('should return true if key and path exists', () =>{
+        enmap.set('hasPath', 'value', 'nested');
+
+        expect(enmap.has('hasPath', 'nested')).toBe(true);
+      });
+
       test("should return false if key doesn't exist", () => {
         expect(enmap.has('unknown')).toBe(false);
       });
