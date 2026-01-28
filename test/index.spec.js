@@ -493,6 +493,16 @@ describe('Enmap', () => {
       test("should return false if key doesn't exist", () => {
         expect(enmap.has('unknown')).toBe(false);
       });
+
+      test("Should return false if the subkey doesn't exists", () => {
+        enmap.set('hasPath2', undefined, 'nested');
+        expect(enmap.has('hasPath2', 'nested')).toBe(false);
+      });
+
+      test("should return false if key exists but path doesn't", () => {
+        enmap.set('hasPath3', 'value', 'nested');
+        expect(enmap.has('hasPath3', 'other')).toBe(false);
+      });
     });
 
     describe('includes', () => {
