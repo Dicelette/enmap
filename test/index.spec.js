@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from 'vitest';
+import { describe, test, expect, mock, spyOn } from 'bun:test';
 import { parse, stringify } from 'better-serialize';
 import Enmap from '../src/index.ts';
 import { mkdir, rm } from 'fs/promises';
@@ -15,7 +15,7 @@ describe('Enmap', () => {
     });
 
     test('should create an Enmap w/ warning', () => {
-      const spy = vi.spyOn(console, 'warn');
+      const spy = spyOn(console, 'warn');
 
       const enmap = new Enmap({ name: '::memory::' });
 
@@ -45,7 +45,9 @@ describe('Enmap', () => {
 
       callback();
 
-      expect(enmap.db.open).toBe(false);
+      // bun:sqlite does not expose an `.open` property; instead, attempting
+      // to use a closed database throws a RangeError.
+      expect(() => enmap.db.exec('SELECT 1')).toThrow();
     });
 
     test('should create a persistent Enmap w/ dir', async () => {
@@ -141,10 +143,10 @@ describe('Enmap', () => {
       });
 
       test('should call callback after set', () => {
-        const mock = vi.fn();
-        enmap.changed(mock);
+        const mockFn = mock();
+        enmap.changed(mockFn);
         enmap.set('setCallback', 'value', 'sub');
-        expect(mock).toHaveBeenCalledTimes(1);
+        expect(mockFn).toHaveBeenCalledTimes(1);
         expect(enmap.get('setCallback', 'sub')).toBe('value');
       });
     });
@@ -465,7 +467,7 @@ describe('Enmap', () => {
       });
 
       test('should ignore + warn ensure value w/ default', () => {
-        const spy = vi.spyOn(process, 'emitWarning');
+        const spy = spyOn(process, 'emitWarning');
 
         expect(defaultEnmap.ensure('unknown', 'hello')).toEqual({
           hello: 'world',
