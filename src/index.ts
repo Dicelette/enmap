@@ -21,9 +21,24 @@ import { resolve, sep } from 'path';
 // Package.json
 const pkgdata = JSON.parse(readFileSync('./package.json', 'utf8'));
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 
 // Type definitions
+
+/**
+ * Options accepted by bun:sqlite's Database constructor.
+ * Unlike better-sqlite3, Bun's SQLite does not support `fileMustExist`,
+ * `timeout`, `verbose`, or `nativeBinding` options.
+ */
+export interface BunSQLiteOptions {
+  /** Open the database as read-only (default: false). */
+  readonly?: boolean;
+  /** Allow creating a new database file (default: true). */
+  create?: boolean;
+  /** Open the database for reading and writing (default: true). */
+  readwrite?: boolean;
+}
+
 export interface EnmapOptions<V = unknown, SV = unknown> {
   name?: string;
   dataDir?: string;
@@ -32,7 +47,11 @@ export interface EnmapOptions<V = unknown, SV = unknown> {
   serializer?: (value: V, key: string) => SV;
   deserializer?: (value: SV, key: string) => V;
   inMemory?: boolean;
-  sqliteOptions?: Database.Options;
+  /**
+   * Options passed directly to the bun:sqlite Database constructor.
+   * Replaces the former `better-sqlite3` options object.
+   */
+  sqliteOptions?: BunSQLiteOptions;
 }
 
 type MathOps =
@@ -75,12 +94,12 @@ type PathValue<T, P extends string> = P extends `${infer K}.${infer Rest}`
     : never;
 
 /**
- * A simple, synchronous, fast key/value storage build around better-sqlite3.
+ * A simple, synchronous, fast key/value storage built around bun:sqlite.
  * Contains extra utility methods for managing arrays and objects.
  */
 export default class Enmap<V = any, SV = unknown> {
   #name: string;
-  #db: Database.Database;
+  #db: Database;
   #inMemory: boolean;
   #autoEnsure?: V;
   #ensureProps: boolean;
@@ -102,7 +121,7 @@ export default class Enmap<V = any, SV = unknown> {
    * @param options.serializer Optional. If a function is provided, it will execute on the data when it is written to the database. This is generally used to convert the value into a format that can be saved in the database, such as converting a complete class instance to just its ID. This function may return the value to be saved, or a promise that resolves to that value (in other words, can be an async function).
    * @param options.deserializer Optional. If a function is provided, it will execute on the data when it is read from the database. This is generally used to convert the value from a stored ID into a more complex object. This function may return a value, or a promise that resolves to that value (in other words, can be an async function).
    * @param options.inMemory Optional. If set to true, the enmap will be in-memory only, and will not write to disk. Useful for temporary stores.
-   * @param options.sqliteOptions Optional. An object of options to pass to the better-sqlite3 Database constructor.
+   * @param options.sqliteOptions Optional. An object of options to pass to the bun:sqlite Database constructor.
    * @example
    * import Enmap from 'enmap';
    * // Named, Persistent enmap
@@ -142,6 +161,13 @@ export default class Enmap<V = any, SV = unknown> {
         }
       }
       const dataDir = resolve(process.cwd(), options.dataDir || 'data');
+      // bun:sqlite throws a generic Error when the directory is missing; we
+      // normalise that to a TypeError to preserve the original API contract.
+      if (options.dataDir && !existsSync(dataDir)) {
+        throw new TypeError(
+          `The directory "${dataDir}" does not exist. Please create it before using enmap.`,
+        );
+      }
       this.#db = new Database(
         `${dataDir}${sep}enmap.sqlite`,
         options.sqliteOptions,
@@ -168,9 +194,10 @@ export default class Enmap<V = any, SV = unknown> {
         )
         .run();
 
-      // Define table properties : sync and write-ahead-log
-      this.#db.pragma('synchronous = 1');
-      this.#db.pragma('journal_mode = wal');
+      // Define table properties: sync and write-ahead-log.
+      // bun:sqlite does not expose a .pragma() helper; use .exec() instead.
+      this.#db.exec('PRAGMA synchronous = 1');
+      this.#db.exec('PRAGMA journal_mode = wal');
 
       // Create autonum table
       this.#db
@@ -212,7 +239,7 @@ export default class Enmap<V = any, SV = unknown> {
     } else {
       data = value;
     }
-    if (isFunction(this.#changedCB))
+    if (typeof this.#changedCB === 'function')
       this.#changedCB(key, oldValue as V, data as V);
     this.#set(key, data as V);
     return this;
@@ -336,11 +363,11 @@ export default class Enmap<V = any, SV = unknown> {
   }
 
   /**
-   * Get the better-sqlite3 database object. Useful if you want to directly query or interact with the
+   * Get the bun:sqlite database object. Useful if you want to directly query or interact with the
    * underlying SQLite database. Use at your own risk, as errors here might cause loss of data or corruption!
    * @return {Database}
    */
-  get db(): Database.Database {
+  get db(): Database {
     return this.#db;
   }
 
@@ -376,12 +403,11 @@ export default class Enmap<V = any, SV = unknown> {
    * @returns {Array<string>} An array of all the keys in the enmap.
    */
   keys(): string[] {
-    const stmt = this.#db.prepare(`SELECT key FROM ${this.#name}`);
-    const indexes: string[] = [];
-    for (const row of stmt.iterate() as IterableIterator<{ key: string }>) {
-      indexes.push(row.key);
-    }
-    return indexes;
+    // bun:sqlite uses .all() to fetch all rows; the result is cast to the
+    // expected row shape since Statement<unknown> doesn't carry type information.
+    return (this.#db.prepare(`SELECT key FROM ${this.#name}`).all() as { key: string }[]).map(
+      (row) => row.key,
+    );
   }
 
   indexes(): string[] {
@@ -393,12 +419,9 @@ export default class Enmap<V = any, SV = unknown> {
    * @returns {Array<*>} An array of all the values in the enmap.
    */
   values(): V[] {
-    const stmt = this.#db.prepare(`SELECT value FROM ${this.#name}`);
-    const values: V[] = [];
-    for (const row of stmt.iterate() as IterableIterator<{ value: string }>) {
-      values.push(this.#parse(row.value));
-    }
-    return values;
+    return (this.#db.prepare(`SELECT value FROM ${this.#name}`).all() as { value: string }[]).map(
+      (row) => this.#parse(row.value),
+    );
   }
 
   /**
@@ -406,15 +429,12 @@ export default class Enmap<V = any, SV = unknown> {
    * @returns {Array<Array<*,*>>} An array of arrays, with each sub-array containing two items, the key and the value.
    */
   entries(): [string, V][] {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    const entries: [string, V][] = [];
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
-      entries.push([row.key, this.#parse(row.value, row.key)]);
-    }
-    return entries;
+    return (
+      this.#db.prepare(`SELECT key, value FROM ${this.#name}`).all() as {
+        key: string;
+        value: string;
+      }[]
+    ).map((row) => [row.key, this.#parse(row.value, row.key)]);
   }
 
   /**
@@ -701,14 +721,10 @@ export default class Enmap<V = any, SV = unknown> {
    * @returns {string} The enmap data in a stringified JSON format.
    */
   export(): string {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    const entries: { key: string; value: string }[] = [];
-    for (const row of stmt.iterate() as IterableIterator<{
+    const entries = this.#db.prepare(`SELECT key, value FROM ${this.#name}`).all() as {
       key: string;
       value: string;
-    }>) {
-      entries.push(row);
-    }
+    }[];
     return stringify({
       name: this.#name,
       exportDate: Date.now(),
@@ -792,17 +808,13 @@ export default class Enmap<V = any, SV = unknown> {
    * or an array of values of `count` length
    */
   random(count = 1): [string, V][] {
-    const stmt = this.#db
-      .prepare(`SELECT key, value FROM ${this.#name} ORDER BY RANDOM() LIMIT ?`)
-      .bind(count);
-    const results: [string, V][] = [];
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
-      results.push([row.key, this.#parse(row.value, row.key)]);
-    }
-    return results;
+    // better-sqlite3 used .bind(count).iterate(); bun:sqlite uses .all(count)
+    // since .iterate() is not in the bun-types type definitions.
+    return (
+      this.#db
+        .prepare(`SELECT key, value FROM ${this.#name} ORDER BY RANDOM() LIMIT ?`)
+        .all(count) as { key: string; value: string }[]
+    ).map((row) => [row.key, this.#parse(row.value, row.key)]);
   }
 
   /**
@@ -812,14 +824,11 @@ export default class Enmap<V = any, SV = unknown> {
    * or an array of keys of `count` length
    */
   randomKey(count = 1): string[] {
-    const stmt = this.#db
-      .prepare(`SELECT key FROM ${this.#name} ORDER BY RANDOM() LIMIT ?`)
-      .bind(count);
-    const results: string[] = [];
-    for (const row of stmt.iterate() as IterableIterator<{ key: string }>) {
-      results.push(row.key);
-    }
-    return results;
+    return (
+      this.#db
+        .prepare(`SELECT key FROM ${this.#name} ORDER BY RANDOM() LIMIT ?`)
+        .all(count) as { key: string }[]
+    ).map((row) => row.key);
   }
 
   /**
@@ -835,11 +844,9 @@ export default class Enmap<V = any, SV = unknown> {
     valueOrFunction: ((val: V, key: string) => boolean) | any,
     path?: Path<V>,
   ): boolean {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       const data = isNil(path) ? parsed : _get(parsed, path);
       if (isFunction(valueOrFunction)) {
@@ -868,11 +875,9 @@ export default class Enmap<V = any, SV = unknown> {
     valueOrFunction: ((val: V, key: string) => boolean) | any,
     path?: Path<V>,
   ): boolean {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       const data = isNil(path) ? parsed : _get(parsed, path);
       if (isFunction(valueOrFunction)) {
@@ -896,20 +901,17 @@ export default class Enmap<V = any, SV = unknown> {
    * @returns {Array}
    */
   map<R>(pathOrFn: ((val: V, key: string) => R) | string): R[] {
-    const results: R[] = [];
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    return (
+      this.#db.prepare(`SELECT key, value FROM ${this.#name}`).all() as {
+        key: string;
+        value: string;
+      }[]
+    ).map((row) => {
       const parsed = this.#parse(row.value, row.key);
-      if (isFunction(pathOrFn)) {
-        results.push((pathOrFn as (val: V, key: string) => R)(parsed, row.key));
-      } else {
-        results.push(_get(parsed, pathOrFn as string));
-      }
-    }
-    return results;
+      return isFunction(pathOrFn)
+        ? (pathOrFn as (val: V, key: string) => R)(parsed, row.key)
+        : _get(parsed, pathOrFn as string);
+    });
   }
 
   /**
@@ -928,11 +930,9 @@ export default class Enmap<V = any, SV = unknown> {
     pathOrFn: ((val: V, key: string) => boolean) | string,
     value?: any,
   ): V | undefined {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       const func = isFunction(pathOrFn)
         ? (pathOrFn as (val: V, key: string) => boolean)
@@ -960,11 +960,9 @@ export default class Enmap<V = any, SV = unknown> {
     pathOrFn: ((val: V, key: string) => boolean) | string,
     value?: any,
   ): string | undefined {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       const func = isFunction(pathOrFn)
         ? (pathOrFn as (val: V, key: string) => boolean)
@@ -987,16 +985,14 @@ export default class Enmap<V = any, SV = unknown> {
     predicate: (accumulator: R, val: V, key: string) => R,
     initialValue: R,
   ): R {
-    let accumulator = initialValue;
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
-      const parsed = this.#parse(row.value, row.key);
-      accumulator = predicate(accumulator, parsed, row.key);
-    }
-    return accumulator;
+    return (
+      this.#db.prepare(`SELECT key, value FROM ${this.#name}`).all() as {
+        key: string;
+        value: string;
+      }[]
+    ).reduce((acc, row) => {
+      return predicate(acc, this.#parse(row.value, row.key), row.key);
+    }, initialValue);
   }
 
   /**
@@ -1014,11 +1010,9 @@ export default class Enmap<V = any, SV = unknown> {
     value?: any,
   ): V[] {
     const results: V[] = [];
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       if (isFunction(pathOrFn)) {
         if ((pathOrFn as (val: V, key: string) => boolean)(parsed, row.key)) {
@@ -1049,7 +1043,6 @@ export default class Enmap<V = any, SV = unknown> {
     pathOrFn: ((val: V, key: string) => boolean) | string,
     value?: any,
   ): number {
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
     const deleteStmt = this.#db.prepare(
       `DELETE FROM ${this.#name} WHERE key = ?`,
     );
@@ -1058,10 +1051,9 @@ export default class Enmap<V = any, SV = unknown> {
       for (const key of keys) deleteStmt.run(key);
     });
     let count = 0;
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       if (isFunction(pathOrFn)) {
         if ((pathOrFn as (val: V, key: string) => boolean)(parsed, row.key)) {
@@ -1106,11 +1098,9 @@ export default class Enmap<V = any, SV = unknown> {
     value?: any,
   ): [V[], V[]] {
     const results: [V[], V[]] = [[], []];
-    const stmt = this.#db.prepare(`SELECT key, value FROM ${this.#name}`);
-    for (const row of stmt.iterate() as IterableIterator<{
-      key: string;
-      value: string;
-    }>) {
+    for (const row of this.#db
+      .prepare(`SELECT key, value FROM ${this.#name}`)
+      .all() as { key: string; value: string }[]) {
       const parsed = this.#parse(row.value, row.key);
       if (isFunction(pathOrFn)) {
         if ((pathOrFn as (val: V, key: string) => boolean)(parsed, row.key)) {
